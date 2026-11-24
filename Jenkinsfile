@@ -4,6 +4,17 @@ pipeline {
     agent any
 
     stages {
+        stage('Preparar workspace') {
+            steps {
+                // Jenkins ya hizo checkout del repo (Pipeline script from SCM)
+                sh '''
+                    git log -1 --pretty='Commit: %H  Autor: %an  Mensaje: %s'
+                    rm -rf reports && mkdir -p reports
+                    ls -la
+                '''
+            }
+        }
+        
         stage('Obtener código') {
             steps {
                 deleteDir()
