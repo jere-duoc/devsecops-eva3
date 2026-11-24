@@ -1,0 +1,36 @@
+# Reglas para detectar incidentes de seguridad y disponibilidad
+groups:
+  - name: securedev-seguridad
+    rules:
+      - alert: FuerzaBrutaLogin
+        expr: increase(securedev_login_failures_total[1m]) > 5
+        labels:
+          severity: alta
+        annotations:
+          summary: "Posible ataque de fuerza bruta en /login"
+          description: "{{ $value | humanize }} intentos de acceso fallidos en el último minuto."
+
+      - alert: EscaneoOTraficoAnomalo
+        expr: sum(increase(securedev_http_requests_total{status=~"4.."}[1m])) > 30
+        labels:
+          severity: media
+        annotations:
+          summary: "Muchas respuestas 4xx: posible escaneo de vulnerabilidades"
+          description: "{{ $value | humanize }} respuestas 4xx en el último minuto."
+
+      - alert: ErroresDelServidor
+        expr: sum(increase(securedev_http_requests_total{status=~"5.."}[1m])) > 0
+        labels:
+          severity: media
+        annotations:
+          summary: "La app está respondiendo errores 5xx"
+          description: "{{ $value | humanize }} errores 5xx en el último minuto (posible inyección o fallo)."
+
+      - alert: AppCaida
+        expr: up{job="securedev-app"} == 0
+        for: 30s
+        labels:
+          severity: alta
+        annotations:
+          summary: "SecureDev no responde"
+          description: "Prometheus no puede leer /metrics desde hace más de 30 segundos."

@@ -1,3 +1,8 @@
+# SecureDev Tickets + monitorización (Prometheus + Grafana)
+# Levantar (PowerShell, dentro de securedev-lab):  docker compose up -d --build
+#   App:        http://localhost:8000
+#   Prometheus: http://localhost:9090
+#   Grafana:    http://localhost:3000   (usuario y clave en el archivo .env)
 name: securedev-estudiante
 
 services:
@@ -10,6 +15,42 @@ services:
       - app_data:/data
     ports:
       - "127.0.0.1:8000:8000"
+    networks: [monitoreo]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alertas.yml:/etc/prometheus/alertas.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"          # solo accesible desde este PC
+    depends_on: [app]
+    networks: [monitoreo]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:?Define GF_ADMIN_PASSWORD en el archivo .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro   # fuente de datos y dashboards automáticos
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"          # solo accesible desde este PC
+    depends_on: [prometheus]
+    networks: [monitoreo]
+    restart: unless-stopped
 
 volumes:
   app_data:
+  grafana-storage:
+
+networks:
+  monitoreo:
+    driver: bridge
