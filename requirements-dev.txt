@@ -1,0 +1,3 @@
+# Dependencias solo para el pipeline (pruebas); no van en la imagen de producción
+-r requirements.txt
+pytest==9.2.0

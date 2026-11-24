@@ -1,0 +1,67 @@
+# Plan de OWASP ZAP (Automation Framework) para SecureDev Tickets
+# Lo ejecuta la etapa "DAST - OWASP ZAP" del Jenkinsfile contra la app desplegada en staging.
+# ${APP_URL} y ${WORKSPACE} los entrega Jenkins como variables de entorno.
+env:
+  contexts:
+    - name: securedev
+      urls:
+        - ${APP_URL}
+      includePaths:
+        - ${APP_URL}.*
+      excludePaths:
+        - ${APP_URL}/logout.*        # evita que el escaneo cierre su propia sesión
+      authentication:
+        method: form
+        parameters:
+          loginPageUrl: ${APP_URL}/login
+          loginRequestUrl: ${APP_URL}/login
+          loginRequestBody: "username={%username%}&password={%password%}"
+        verification:
+          method: response
+          loggedInRegex: "\\QSalir\\E"      # el menú muestra "Salir" con sesión iniciada
+          loggedOutRegex: "\\QIngresar\\E"  # la página de login muestra "Ingresar"
+      sessionManagement:
+        method: cookie
+      users:
+        - name: ana
+          credentials:
+            username: ana
+            password: ana123
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+  - type: spider                     # recorre la app autenticado como "ana"
+    parameters:
+      context: securedev
+      user: ana
+      maxDuration: 2
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 2
+  - type: activeScan                 # ataques reales: SQLi, XSS, etc.
+    parameters:
+      context: securedev
+      user: ana
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 10
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: ${WORKSPACE}/reports
+      reportFile: zap-report.html
+      reportTitle: SecureDev Tickets - OWASP ZAP
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: ${WORKSPACE}/reports
+      reportFile: zap-report.json
+  - type: exitStatus                 # 1 = hay alertas Altas, 2 = hay alertas Medias
+    parameters:
+      errorLevel: High
+      warnLevel: Medium
