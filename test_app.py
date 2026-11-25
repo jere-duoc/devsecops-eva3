@@ -1,4 +1,6 @@
 """Pruebas automatizadas de SecureDev Tickets (se ejecutan en la etapa Test del pipeline)."""
+import re
+
 import pytest
 
 from app import create_app
@@ -11,8 +13,16 @@ def client(tmp_path):
     return app.test_client()
 
 
+def csrf(client, url="/login"):
+    """Obtiene el token anti-CSRF del formulario de una página, como lo haría el navegador."""
+    html = client.get(url).get_data(as_text=True)
+    return re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+
+
 def login(client, username="ana", password="ana123"):
-    return client.post("/login", data={"username": username, "password": password})
+    return client.post(
+        "/login", data={"username": username, "password": password, "csrf_token": csrf(client)}
+    )
 
 
 def test_health(client):
@@ -63,7 +73,8 @@ def test_busqueda_no_permite_inyeccion_sql(client):
 def test_comentario_con_script_se_escapa(client):
     """V-04: un comentario con JavaScript se muestra como texto, no se ejecuta (XSS)."""
     login(client)
-    client.post("/tickets/1/comments", data={"body": "<script>alert('xss')</script>"})
+    token = csrf(client, "/tickets/1")
+    client.post("/tickets/1/comments", data={"body": "<script>alert('xss')</script>", "csrf_token": token})
     html = client.get("/tickets/1").get_data(as_text=True)
     assert "<script>alert('xss')</script>" not in html
     assert "&lt;script&gt;" in html
@@ -72,7 +83,9 @@ def test_comentario_con_script_se_escapa(client):
 def test_cabeceras_de_seguridad(client):
     """V-04: las respuestas incluyen CSP y cabeceras anti-clickjacking."""
     response = client.get("/login")
-    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+    csp = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "unsafe-inline" not in csp
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
 
@@ -87,7 +100,7 @@ def test_no_se_puede_ver_ticket_ajeno(client):
 def test_no_se_puede_comentar_ticket_ajeno(client):
     """V-05: ana no puede comentar en el ticket de bruno."""
     login(client)
-    response = client.post("/tickets/2/comments", data={"body": "intruso"})
+    response = client.post("/tickets/2/comments", data={"body": "intruso", "csrf_token": csrf(client, "/")})
     assert response.status_code == 404
 
 
@@ -104,3 +117,18 @@ def test_app_no_inicia_sin_secret_key(tmp_path, monkeypatch):
     monkeypatch.delenv("SECRET_KEY", raising=False)
     with pytest.raises(RuntimeError):
         create_app(tmp_path / "x.db")
+
+
+def test_post_sin_token_csrf_es_rechazado(client):
+    """CSRF: un formulario enviado sin el token (p. ej. desde otro sitio) se rechaza."""
+    login(client)
+    response = client.post("/tickets/1/comments", data={"body": "desde otro sitio"})
+    assert response.status_code == 400
+    response = client.post("/logout")
+    assert response.status_code == 400
+
+
+def test_login_sin_token_csrf_es_rechazado(client):
+    """CSRF: el login también exige token."""
+    response = client.post("/login", data={"username": "ana", "password": "ana123"})
+    assert response.status_code == 400

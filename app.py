@@ -4,7 +4,9 @@ Solo debe ejecutarse en el laboratorio local. El alumnado debe revisar y corregi
 los defectos; estos comentarios no enumeran las respuestas de la evaluación.
 """
 
+import hmac
 import os
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -12,6 +14,7 @@ from pathlib import Path
 from flask import Flask, abort, g, redirect, render_template, request, session, url_for
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.serving import WSGIRequestHandler
 
 
 HTTP_REQUESTS = Counter(
@@ -59,11 +62,27 @@ def create_app(database_path=None, secret_key=None):
     def start_request_timer():
         g.request_started_at = time.perf_counter()
 
+    # Protección CSRF: cada sesión tiene un token aleatorio que todo formulario POST debe enviar
+    def csrf_token():
+        if "_csrf_token" not in session:
+            session["_csrf_token"] = secrets.token_urlsafe(32)
+        return session["_csrf_token"]
+
+    app.jinja_env.globals["csrf_token"] = csrf_token
+
+    @app.before_request
+    def csrf_protect():
+        if request.method == "POST":
+            expected = session.get("_csrf_token", "")
+            received = request.form.get("csrf_token", "")
+            if not expected or not hmac.compare_digest(expected, received):
+                abort(400, "Token CSRF inválido o ausente")
+
     @app.after_request
     def security_headers(response):
         # V-04 (defensa en profundidad): el navegador solo ejecuta recursos del propio sitio
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; style-src 'self'; "
             "frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -210,5 +229,14 @@ def create_app(database_path=None, secret_key=None):
     return app
 
 
+class QuietRequestHandler(WSGIRequestHandler):
+    """No revela la versión de Werkzeug ni de Python en la cabecera Server."""
+
+    def version_string(self):
+        return "SecureDev"
+
+
 if __name__ == "__main__":
-    create_app().run(host=os.getenv("HOST", "127.0.0.1"), port=8000)
+    create_app().run(
+        host=os.getenv("HOST", "127.0.0.1"), port=8000, request_handler=QuietRequestHandler
+    )

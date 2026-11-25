@@ -5,6 +5,7 @@
 <h2>Comentarios</h2>
 {% for comment in comments %}<div class="card">{{ comment.body }}</div>{% else %}<p>Aún no hay comentarios.</p>{% endfor %}
 <form method="post" action="{{ url_for('add_comment', ticket_id=ticket.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Nuevo comentario <textarea name="body" required></textarea></label>
   <p><button>Agregar comentario</button></p>
 </form>
