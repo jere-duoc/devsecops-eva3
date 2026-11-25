@@ -1,0 +1,33 @@
+# Dependabot: revisa las dependencias del proyecto y abre un pull request cuando hay
+# una versión nueva o una corrección de seguridad. Cada PR dispara el pipeline de Jenkins
+# (pruebas, Bandit, pip-audit y ZAP) antes de poder fusionarse.
+version: 2
+updates:
+  # Librerías de Python de la app (requirements.txt y requirements-dev.txt)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Santiago"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencias"
+      - "seguridad"
+    commit-message:
+      prefix: "deps"
+
+  # Imagen base del Dockerfile (python:3.11-slim-bookworm)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Santiago"
+    labels:
+      - "dependencias"
+      - "docker"
+    commit-message:
+      prefix: "deps(docker)"

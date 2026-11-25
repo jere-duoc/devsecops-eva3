@@ -1,6 +1,8 @@
 # Plan de OWASP ZAP (Automation Framework) para SecureDev Tickets
 # Lo ejecuta la etapa "DAST - OWASP ZAP" del Jenkinsfile contra la app desplegada en staging.
 # ${APP_URL} y ${WORKSPACE} los entrega Jenkins como variables de entorno.
+# Autenticación: el pipeline inicia sesión como "ana" (con token CSRF) y entrega la cookie
+# de sesión a ZAP mediante las variables ZAP_AUTH_HEADER / ZAP_AUTH_HEADER_VALUE.
 env:
   contexts:
     - name: securedev
@@ -10,23 +12,6 @@ env:
         - ${APP_URL}.*
       excludePaths:
         - ${APP_URL}/logout.*        # evita que el escaneo cierre su propia sesión
-      authentication:
-        method: form
-        parameters:
-          loginPageUrl: ${APP_URL}/login
-          loginRequestUrl: ${APP_URL}/login
-          loginRequestBody: "username={%username%}&password={%password%}"
-        verification:
-          method: response
-          loggedInRegex: "\\QSalir\\E"      # el menú muestra "Salir" con sesión iniciada
-          loggedOutRegex: "\\QIngresar\\E"  # la página de login muestra "Ingresar"
-      sessionManagement:
-        method: cookie
-      users:
-        - name: ana
-          credentials:
-            username: ana
-            password: ana123
   parameters:
     failOnError: true
     failOnWarning: false
@@ -36,10 +21,9 @@ jobs:
   - type: passiveScan-config
     parameters:
       maxAlertsPerRule: 10
-  - type: spider                     # recorre la app autenticado como "ana"
+  - type: spider                     # recorre la app con la sesión de "ana"
     parameters:
       context: securedev
-      user: ana
       maxDuration: 2
   - type: passiveScan-wait
     parameters:
@@ -47,7 +31,6 @@ jobs:
   - type: activeScan                 # ataques reales: SQLi, XSS, etc.
     parameters:
       context: securedev
-      user: ana
       maxRuleDurationInMins: 2
       maxScanDurationInMins: 10
   - type: report

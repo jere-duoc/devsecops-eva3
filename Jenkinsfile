@@ -102,9 +102,34 @@ H 7 * * 1-5''')                                     // Auditoría diaria (lun-vi
 
         stage('DAST - OWASP ZAP') {
             steps {
+                // 1) Sesión autenticada para ZAP: login con token CSRF, igual que un navegador
+                sh '''
+                    rm -f zap-cookies.txt zap-session.txt
+                    TOKEN=$(curl -fsS -c zap-cookies.txt -b zap-cookies.txt "$APP_URL/login" \
+                            | sed -n 's/.*name="csrf_token" value="\\([^"]*\\)".*/\\1/p' | head -1)
+                    test -n "$TOKEN"
+                    curl -fsS -o /dev/null -c zap-cookies.txt -b zap-cookies.txt \
+                         --data-urlencode "username=ana" --data-urlencode "password=ana123" \
+                         --data-urlencode "csrf_token=$TOKEN" "$APP_URL/login"
+                    curl -fsS -o /dev/null -c zap-cookies.txt -b zap-cookies.txt "$APP_URL/"   # genera el token CSRF de la sesión
+                    SESSION=$(awk '$6 == "session" {print $7}' zap-cookies.txt | tail -1)
+                    test -n "$SESSION"
+                    echo "session=$SESSION" > zap-session.txt
+                    echo "Sesión de prueba creada para ZAP (usuario ana)"
+                '''
                 script {
-                    def rc = sh(script: 'zap.sh -cmd -port 8090 -autorun "$WORKSPACE/zap.yaml" > reports/zap.log 2>&1', returnStatus: true)
+                    // 2) ZAP agrega esa cookie de sesión a todas sus peticiones
+                    def rc = sh(script: '''
+                        export ZAP_AUTH_HEADER=Cookie
+                        export ZAP_AUTH_HEADER_VALUE="$(cat zap-session.txt)"
+                        zap.sh -cmd -port 8090 -autorun "$WORKSPACE/zap.yaml" > reports/zap.log 2>&1
+                    ''', returnStatus: true)
                     sh 'tail -n 60 reports/zap.log || true'
+
+                    // 3) Control de calidad: si ZAP no llegó a las páginas protegidas, el escaneo no sirve
+                    def auth = sh(script: 'grep -Eq "GET /tickets/1 HTTP/1.1\\" 200" reports/app.log', returnStatus: true)
+                    if (auth != 0) { error('ZAP no logró escanear las rutas autenticadas: resultado no confiable') }
+                    echo 'ZAP escaneó rutas autenticadas (/tickets/1 respondió 200)'
                     if (rc == 1) { error('ZAP encontró hallazgos de riesgo ALTO (ver reports/zap-report.html)') }
                     if (rc == 2) { unstable('ZAP encontró hallazgos de riesgo MEDIO (ver reports/zap-report.html)') }
                     if (rc > 2)  { error("ZAP terminó con código inesperado: ${rc}") }
@@ -116,6 +141,7 @@ H 7 * * 1-5''')                                     // Auditoría diaria (lun-vi
     post {
         always {
             sh 'if [ -f app.pid ]; then kill "$(cat app.pid)" 2>/dev/null || true; rm -f app.pid; fi'
+            sh 'rm -f zap-cookies.txt zap-session.txt'   // no dejar la sesión de prueba en el workspace
             archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
         failure  { echo "ALERTA: ${env.JOB_NAME} #${env.BUILD_NUMBER} bloqueado por seguridad: ${env.BUILD_URL}" }
