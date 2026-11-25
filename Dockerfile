@@ -6,6 +6,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py ./
 COPY templates ./templates
 
-ENV PYTHONUNBUFFERED=1 DATABASE_PATH=/data/securedev.db
+ENV PYTHONUNBUFFERED=1 DATABASE_PATH=/data/securedev.db HOST=0.0.0.0
 EXPOSE 8000
 CMD ["python", "app.py"]

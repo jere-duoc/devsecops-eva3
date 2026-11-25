@@ -6,7 +6,7 @@ from app import create_app
 
 @pytest.fixture
 def client(tmp_path):
-    app = create_app(tmp_path / "test.db")
+    app = create_app(tmp_path / "test.db", secret_key="clave-solo-para-pruebas")
     app.config["TESTING"] = True
     return app.test_client()
 
@@ -57,3 +57,50 @@ def test_busqueda_no_permite_inyeccion_sql(client):
     assert "ana:" not in html
 
     
+
+# ---------------- Pruebas de regresión de seguridad ----------------
+
+def test_comentario_con_script_se_escapa(client):
+    """V-04: un comentario con JavaScript se muestra como texto, no se ejecuta (XSS)."""
+    login(client)
+    client.post("/tickets/1/comments", data={"body": "<script>alert('xss')</script>"})
+    html = client.get("/tickets/1").get_data(as_text=True)
+    assert "<script>alert('xss')</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_cabeceras_de_seguridad(client):
+    """V-04: las respuestas incluyen CSP y cabeceras anti-clickjacking."""
+    response = client.get("/login")
+    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_no_se_puede_ver_ticket_ajeno(client):
+    """V-05: ana no puede abrir el ticket 2, que es de bruno (IDOR)."""
+    login(client)
+    assert client.get("/tickets/1").status_code == 200
+    assert client.get("/tickets/2").status_code == 404
+
+
+def test_no_se_puede_comentar_ticket_ajeno(client):
+    """V-05: ana no puede comentar en el ticket de bruno."""
+    login(client)
+    response = client.post("/tickets/2/comments", data={"body": "intruso"})
+    assert response.status_code == 404
+
+
+def test_busqueda_solo_muestra_tickets_propios(client):
+    """V-05: la búsqueda no revela tickets de otros usuarios."""
+    login(client)
+    html = client.get("/search", query_string={"q": ""}).get_data(as_text=True)
+    assert "Revisión de despliegue" in html      # ticket de ana
+    assert "Acceso al panel" not in html          # ticket de bruno
+
+
+def test_app_no_inicia_sin_secret_key(tmp_path, monkeypatch):
+    """V-06: sin SECRET_KEY la app no arranca (no hay clave por defecto)."""
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        create_app(tmp_path / "x.db")

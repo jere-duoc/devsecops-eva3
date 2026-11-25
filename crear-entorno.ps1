@@ -13,7 +13,8 @@ Write-Host "Instalando dependencias (Flask, Werkzeug, prometheus-client) ..."
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-$env:SECRET_KEY    = "clave-insegura-solo-laboratorio"
+# Clave de sesión aleatoria en cada ejecución (nunca fija en el código)
+$env:SECRET_KEY    = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
 $env:DATABASE_PATH = Join-Path $PSScriptRoot "securedev.db"
 
 Write-Host "Levantando app en http://localhost:8000  (Ctrl+C para detener)"
