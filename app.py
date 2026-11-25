@@ -30,9 +30,15 @@ LOGIN_FAILURES = Counter(
 )
 
 
-def create_app(database_path=None):
+def create_app(database_path=None, secret_key=None):
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "clave-insegura-solo-laboratorio")
+    # V-06: la clave de sesión es obligatoria y nunca tiene un valor por defecto en el código
+    secret_key = secret_key or os.environ.get("SECRET_KEY")
+    if not secret_key:
+        raise RuntimeError("Falta la variable de entorno SECRET_KEY")
+    app.config["SECRET_KEY"] = secret_key
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["DATABASE_PATH"] = str(
         database_path or os.getenv("DATABASE_PATH", str(Path(__file__).with_name("securedev.db")))
     )
@@ -52,6 +58,18 @@ def create_app(database_path=None):
     @app.before_request
     def start_request_timer():
         g.request_started_at = time.perf_counter()
+
+    @app.after_request
+    def security_headers(response):
+        # V-04 (defensa en profundidad): el navegador solo ejecuta recursos del propio sitio
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        return response
 
     @app.after_request
     def record_request(response):
@@ -141,8 +159,10 @@ def create_app(database_path=None):
     def ticket(ticket_id):
         if not current_user():
             return redirect(url_for("login"))
+        # V-05: solo el dueño puede ver el ticket; para otros usuarios "no existe" (404)
         item = db().execute(
-            "SELECT id, owner_id, title, body FROM tickets WHERE id = ?", (ticket_id,)
+            "SELECT id, owner_id, title, body FROM tickets WHERE id = ? AND owner_id = ?",
+            (ticket_id, current_user()),
         ).fetchone()
         if item is None:
             abort(404)
@@ -155,7 +175,11 @@ def create_app(database_path=None):
     def add_comment(ticket_id):
         if not current_user():
             return redirect(url_for("login"))
-        if db().execute("SELECT id FROM tickets WHERE id = ?", (ticket_id,)).fetchone() is None:
+        # V-05: solo se puede comentar en tickets propios
+        owned = db().execute(
+            "SELECT id FROM tickets WHERE id = ? AND owner_id = ?", (ticket_id, current_user())
+        ).fetchone()
+        if owned is None:
             abort(404)
         body = request.form.get("body", "")
         db().execute(
@@ -170,8 +194,9 @@ def create_app(database_path=None):
         if not current_user():
             return redirect(url_for("login"))
         query = request.args.get("q", "")
-        sql = "SELECT id, title FROM tickets WHERE title LIKE ? ORDER BY id"
-        tickets = db().execute(sql, (f"%{query}%",)).fetchall()
+        # V-01: consulta parametrizada · V-05: solo tickets del usuario conectado
+        sql = "SELECT id, title FROM tickets WHERE owner_id = ? AND title LIKE ? ORDER BY id"
+        tickets = db().execute(sql, (current_user(), f"%{query}%")).fetchall()
         return render_template("search.html", tickets=tickets, query=query)
 
     @app.get("/health")
