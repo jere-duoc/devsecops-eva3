@@ -170,8 +170,8 @@ def create_app(database_path=None):
         if not current_user():
             return redirect(url_for("login"))
         query = request.args.get("q", "")
-        sql = f"SELECT id, title FROM tickets WHERE title LIKE '%{query}%' ORDER BY id"
-        tickets = db().execute(sql).fetchall()
+        sql = "SELECT id, title FROM tickets WHERE title LIKE ? ORDER BY id"
+        tickets = db().execute(sql, (f"%{query}%",)).fetchall()
         return render_template("search.html", tickets=tickets, query=query)
 
     @app.get("/health")

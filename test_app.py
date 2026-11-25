@@ -46,3 +46,14 @@ def test_login_incorrecto(client):
     response = login(client, password="incorrecta")
     assert response.status_code == 200
     assert "Credenciales inválidas" in response.get_data(as_text=True)
+
+def test_busqueda_no_permite_inyeccion_sql(client):
+    login(client)
+    payload = "x' UNION SELECT id, username || ':' || password_hash FROM users --"
+    response = client.get("/search", query_string={"q": payload})
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "scrypt:" not in html and "pbkdf2:" not in html   # no se filtran hashes
+    assert "ana:" not in html
+
+    
